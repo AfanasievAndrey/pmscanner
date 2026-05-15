@@ -226,7 +226,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 
   <div class="footer-bar">
     <span class="footer-note" id="lu">Not yet refreshed</span>
-    <span class="footer-note">Data · Finnhub API · Auto-refresh 60s</span>
+    <span class="footer-note">Data · Massive.com API · Auto-refresh 60s</span>
   </div>
 
 </div>
@@ -257,19 +257,31 @@ function updateClock(){
 }
 setInterval(updateClock,1000);updateClock();
 
+const API_KEY='QdhDtC2VsXl0S1GApzUxbtbtG6Zz24r9';
+const API_BASE='https://api.massive.com'; // get free key at polygon.io
+
 async function fetchQuote(t){
-  try{const r=await fetch(`https://finnhub.io/api/v1/quote?symbol=${t}&token=cqto2khr01qo9fdj5ms0cqto2khr01qo9fdj5msg`);if(!r.ok)throw 0;const d=await r.json();if(!d||(!d.c&&d.c!==0))throw 0;return{price:d.c,prev:d.pc,open:d.o,high:d.h,low:d.l,change:d.d,pct:d.dp};}catch{return null;}
+  try{
+    const r=await fetch(`${API_BASE}/v2/snapshot/locale/us/markets/stocks/tickers/${t}?apiKey=${API_KEY}`);
+    if(r.status===403){document.getElementById('em').textContent='Invalid API key. Get a free key at polygon.io';return null;}
+    if(r.status===429){document.getElementById('em').textContent='API rate limit hit.';return null;}
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    const tk=d.ticker;
+    if(!tk||!tk.day){document.getElementById('em').textContent='"'+t+'" not found or invalid symbol.';return null;}
+    return{price:tk.lastTrade?.p||tk.day.c,prev:tk.prevDay?.c,open:tk.day.o,high:tk.day.h,low:tk.day.l,change:tk.todaysChange,pct:tk.todaysChangePerc};
+  }catch(e){console.error('fetchQuote',t,e);return null;}
 }
 
 async function fetchCandles(t){
-  /* Finnhub free: daily candles, last 30 trading days */
   try{
-    const to=Math.floor(Date.now()/1000);
-    const from=to-86400*45;
-    const r=await fetch(`https://finnhub.io/api/v1/stock/candle?symbol=${t}&resolution=D&from=${from}&to=${to}&token=cqto2khr01qo9fdj5ms0cqto2khr01qo9fdj5msg`);
-    if(!r.ok)throw 0;const d=await r.json();
-    if(d.s!=='ok'||!d.c?.length)throw 0;
-    return{c:d.c,o:d.o,h:d.h,l:d.l,v:d.v,t:d.t};
+    const to=new Date().toISOString().split('T')[0];
+    const from=new Date(Date.now()-86400000*45).toISOString().split('T')[0];
+    const r=await fetch(`${API_BASE}/v2/aggs/ticker/${t}/range/1/day/${from}/${to}?adjusted=true&sort=asc&limit=50&apiKey=${API_KEY}`);
+    if(!r.ok)throw 0;
+    const d=await r.json();
+    if(!d.results?.length)throw 0;
+    return{c:d.results.map(r=>r.c),o:d.results.map(r=>r.o),h:d.results.map(r=>r.h),l:d.results.map(r=>r.l),v:d.results.map(r=>r.v),t:d.results.map(r=>r.t/1000)};
   }catch{return null;}
 }
 
