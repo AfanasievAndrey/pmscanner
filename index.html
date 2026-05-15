@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PreMarket Scanner</title>
+<title>Dron Scanner</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -165,8 +165,8 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <!-- TOPBAR -->
   <div class="topbar">
     <div>
-      <span class="logo-mark">▶ PM/SCAN</span>
-      <span class="logo-sub">Pre-market Scanner</span>
+      <span class="logo-mark">▶ DRON/SCAN</span>
+      <span class="logo-sub">Dron Scanner</span>
     </div>
     <div class="topbar-right">
       <span class="et-clock" id="et-clock">--:-- ET</span>
@@ -387,11 +387,12 @@ async function renderDetail(i){
         <span>Price History</span>
         <div class="chart-tabs">
           <button class="chart-tab active" id="tab-line" onclick="switchChart('line',${i})">Line</button>
+          <button class="chart-tab" id="tab-candle" onclick="switchChart('candle',${i})">Candle</button>
           <button class="chart-tab" id="tab-bar" onclick="switchChart('bar',${i})">Bar</button>
         </div>
       </div>
       <div class="chart-wrap">
-        <canvas id="main-chart" role="img" aria-label="Price history chart for ${w.t}"></canvas>
+        <div id="main-chart" style="width:100%;height:100%"></div>
       </div>
     </div>
 
@@ -493,54 +494,45 @@ async function switchChart(type,i){
   await drawChart(watchlist[i].t,type,i);
 }
 
+function toDateStr(ts){const d=new Date(ts*1000);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+
 async function drawChart(ticker,type,i){
-  const canvas=document.getElementById('main-chart');
-  if(!canvas)return;
-  if(chartInst){chartInst.destroy();chartInst=null;}
+  const container=document.getElementById('main-chart');
+  if(!container)return;
+  if(chartInst){chartInst.remove();chartInst=null;}
 
   let cd=candles[ticker];
-  if(!cd){
-    cd=await fetchCandles(ticker);
-    if(cd)candles[ticker]=cd;
-  }
+  if(!cd){cd=await fetchCandles(ticker);if(cd)candles[ticker]=cd;}
 
-  const isDark=true;
-  const upColor='rgba(0,212,170,0.85)';
-  const dnColor='rgba(240,90,90,0.8)';
-  const lineColor='#00d4aa';
-  const gridColor='rgba(255,255,255,0.05)';
-  const textColor='#6b7c91';
+  const UP='#00d4aa',DN='#f05a5a',GRID='rgba(255,255,255,0.05)',TXT='#6b7c91',BG='#0d1117';
+  const baseOpts={width:container.clientWidth||400,height:180,layout:{background:{type:'solid',color:BG},textColor:TXT,fontFamily:'IBM Plex Mono',fontSize:10},grid:{vertLines:{color:GRID},horzLines:{color:GRID}},crosshair:{mode:LightweightCharts.CrosshairMode.Normal},rightPriceScale:{borderColor:'rgba(255,255,255,0.08)'},timeScale:{borderColor:'rgba(255,255,255,0.08)',timeVisible:false},handleScroll:false,handleScale:false};
 
   if(!cd||!cd.c?.length){
-    /* fallback: use quote data to fake a mini chart */
     const d=priceData[ticker];
-    if(!d){canvas.parentElement.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:180px;font-family:var(--mono);font-size:11px;color:var(--text3)">No chart data available</div>';return;}
-    const pts=[d.prev,d.open,d.low,(d.low+d.high)/2,d.high,d.price];
-    const labels=['Prev','Open','Low','Mid','High','Now'];
-    chartInst=new Chart(canvas,{
-      type:'line',
-      data:{labels,datasets:[{data:pts,borderColor:lineColor,backgroundColor:'rgba(0,212,170,0.05)',tension:0.4,fill:true,pointRadius:4,pointBackgroundColor:lineColor,borderWidth:2}]},
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'$'+c.parsed.y.toFixed(2)}}},scales:{x:{ticks:{color:textColor,font:{family:'IBM Plex Mono',size:9}},grid:{color:gridColor}},y:{ticks:{color:textColor,font:{family:'IBM Plex Mono',size:9},callback:v=>'$'+v.toFixed(0)},grid:{color:gridColor}}}}
-    });
+    if(!d){container.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:180px;font-family:var(--mono);font-size:11px;color:var(--text3)">No chart data</div>';return;}
+    chartInst=LightweightCharts.createChart(container,baseOpts);
+    const s=chartInst.addAreaSeries({topColor:'rgba(0,212,170,0.15)',bottomColor:'rgba(0,212,170,0)',lineColor:UP,lineWidth:2,priceLineVisible:false});
+    const now=Math.floor(Date.now()/1000);
+    s.setData([{time:toDateStr(now-86400*5),value:d.prev},{time:toDateStr(now-86400*4),value:d.open},{time:toDateStr(now-86400*3),value:d.low},{time:toDateStr(now-86400*2),value:(d.low+d.high)/2},{time:toDateStr(now-86400),value:d.high},{time:toDateStr(now),value:d.price}].filter(p=>p.value));
+    chartInst.timeScale().fitContent();
     return;
   }
 
-  const labels=cd.t.map(ts=>{const d=new Date(ts*1000);return(d.getMonth()+1)+'/'+(d.getDate());});
+  const data=cd.t.map((ts,idx)=>({time:toDateStr(ts),open:cd.o[idx],high:cd.h[idx],low:cd.l[idx],close:cd.c[idx],value:cd.c[idx],color:cd.c[idx]>=cd.o[idx]?'rgba(0,212,170,0.8)':'rgba(240,90,90,0.75)'}));
 
-  if(type==='bar'){
-    const barColors=cd.c.map((c,i)=>c>=cd.o[i]?upColor:dnColor);
-    chartInst=new Chart(canvas,{
-      type:'bar',
-      data:{labels,datasets:[{label:'Close',data:cd.c,backgroundColor:barColors,borderRadius:2,borderSkipped:false}]},
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'Close: $'+c.parsed.y.toFixed(2)}}},scales:{x:{ticks:{color:textColor,font:{family:'IBM Plex Mono',size:8},maxRotation:45,autoSkip:true,maxTicksLimit:12},grid:{display:false}},y:{ticks:{color:textColor,font:{family:'IBM Plex Mono',size:9},callback:v=>'$'+v.toFixed(0)},grid:{color:gridColor}}}}
-    });
+  chartInst=LightweightCharts.createChart(container,baseOpts);
+
+  if(type==='candle'){
+    const s=chartInst.addCandlestickSeries({upColor:UP,downColor:DN,borderUpColor:UP,borderDownColor:DN,wickUpColor:UP,wickDownColor:DN});
+    s.setData(data);
+  } else if(type==='bar'){
+    const s=chartInst.addHistogramSeries({priceFormat:{type:'price'}});
+    s.setData(data);
   } else {
-    chartInst=new Chart(canvas,{
-      type:'line',
-      data:{labels,datasets:[{label:'Close',data:cd.c,borderColor:lineColor,backgroundColor:'rgba(0,212,170,0.06)',tension:0.3,fill:true,pointRadius:0,pointHoverRadius:4,pointHoverBackgroundColor:lineColor,borderWidth:2}]},
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false,callbacks:{label:c=>'$'+c.parsed.y.toFixed(2)}}},interaction:{mode:'index',intersect:false},scales:{x:{ticks:{color:textColor,font:{family:'IBM Plex Mono',size:8},maxRotation:45,autoSkip:true,maxTicksLimit:12},grid:{display:false}},y:{ticks:{color:textColor,font:{family:'IBM Plex Mono',size:9},callback:v=>'$'+v.toFixed(0)},grid:{color:gridColor}}}}
-    });
+    const s=chartInst.addAreaSeries({topColor:'rgba(0,212,170,0.15)',bottomColor:'rgba(0,212,170,0)',lineColor:UP,lineWidth:2,priceLineVisible:false,crosshairMarkerRadius:4});
+    s.setData(data.map(d=>({time:d.time,value:d.close})));
   }
+  chartInst.timeScale().fitContent();
 }
 
 function updateNote(i,v){watchlist[i].n=v;saveWL();}
