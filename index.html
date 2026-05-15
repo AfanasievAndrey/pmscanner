@@ -258,7 +258,7 @@ function updateClock(){
 setInterval(updateClock,1000);updateClock();
 
 // Replace with your deployed Cloudflare Worker URL (e.g. https://yahoo-proxy.yourname.workers.dev)
-const WORKER_URL='https://yahoo-proxy.YOUR_SUBDOMAIN.workers.dev'; // get free key at polygon.io
+const WORKER_URL='https://yahoo-proxy.afanasiev-andrii1983.workers.dev'; // get free key at polygon.io
 
 async function fetchYahoo(t,range,interval){
   const r=await fetch(`${WORKER_URL}/?t=${t}&range=${range}&interval=${interval}`);
