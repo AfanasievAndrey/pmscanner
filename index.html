@@ -116,6 +116,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .chart-tab{font-family:var(--mono);font-size:9px;letter-spacing:1px;padding:3px 8px;border-radius:3px;border:1px solid var(--border);background:transparent;color:var(--text3);cursor:pointer;transition:all .15s;text-transform:uppercase}
 .chart-tab.active{border-color:var(--accent2);color:var(--accent);background:rgba(0,212,170,.07)}
 .chart-wrap{position:relative;height:180px}
+.range-tabs{display:flex;gap:4px;margin-top:8px}
 
 /* Level-2 metrics grid */
 .metrics-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border);border-bottom:1px solid var(--border)}
@@ -282,9 +283,12 @@ async function fetchQuote(t){
   }catch(e){console.error('fetchQuote',t,e);document.getElementById('em').textContent='Network error. Check Worker URL.';return null;}
 }
 
-async function fetchCandles(t){
+const RANGE_MAP={'1d':{r:'1d',i:'5m'},'1w':{r:'5d',i:'30m'},'1m':{r:'1mo',i:'1d'},'1y':{r:'1y',i:'1d'},'all':{r:'max',i:'1mo'}};
+
+async function fetchCandles(t,rangeKey='1m'){
   try{
-    const res=await fetchYahoo(t,'2mo','1d');
+    const{r,i}=RANGE_MAP[rangeKey]||RANGE_MAP['1m'];
+    const res=await fetchYahoo(t,r,i);
     const ts=res.timestamp;const q=res.indicators?.quote?.[0];
     if(!ts?.length||!q)throw 0;
     // Filter out null entries (Yahoo sometimes returns nulls for non-trading times)
@@ -379,6 +383,7 @@ function renderList(){
 
 async function selectTicker(i){
   activeIdx=i;
+  currentRange='1m';currentChartType='line';
   renderList();
   await renderDetail(i);
 }
@@ -417,6 +422,13 @@ async function renderDetail(i){
       </div>
       <div class="chart-wrap">
         <div id="main-chart" style="width:100%;height:100%"></div>
+      </div>
+      <div class="range-tabs">
+        <button class="chart-tab" id="rng-1d" onclick="switchRange('1d',${i})">1D</button>
+        <button class="chart-tab" id="rng-1w" onclick="switchRange('1w',${i})">1W</button>
+        <button class="chart-tab active" id="rng-1m" onclick="switchRange('1m',${i})">1M</button>
+        <button class="chart-tab" id="rng-1y" onclick="switchRange('1y',${i})">1Y</button>
+        <button class="chart-tab" id="rng-all" onclick="switchRange('all',${i})">All</button>
       </div>
     </div>
 
@@ -510,12 +522,20 @@ function computeSignals(d,ticker){
 }
 
 let currentChartType='line';
+let currentRange='1m';
 
 async function switchChart(type,i){
   currentChartType=type;
-  document.querySelectorAll('.chart-tab').forEach(t=>t.classList.remove('active'));
+  ['line','candle','bar'].forEach(x=>document.getElementById('tab-'+x)?.classList.remove('active'));
   document.getElementById('tab-'+type).classList.add('active');
   await drawChart(watchlist[i].t,type,i);
+}
+
+async function switchRange(rk,i){
+  currentRange=rk;
+  ['1d','1w','1m','1y','all'].forEach(x=>document.getElementById('rng-'+x)?.classList.remove('active'));
+  document.getElementById('rng-'+rk).classList.add('active');
+  await drawChart(watchlist[i].t,currentChartType,i);
 }
 
 function toDateStr(ts){const d=new Date(ts*1000);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
@@ -525,11 +545,13 @@ async function drawChart(ticker,type,i){
   if(!container)return;
   if(chartInst){chartInst.remove();chartInst=null;}
 
-  let cd=candles[ticker];
-  if(!cd){cd=await fetchCandles(ticker);if(cd)candles[ticker]=cd;}
+  const cacheKey=ticker+'_'+currentRange;
+  let cd=candles[cacheKey];
+  if(!cd){cd=await fetchCandles(ticker,currentRange);if(cd)candles[cacheKey]=cd;}
 
   const UP='#00d4aa',DN='#f05a5a',GRID='rgba(255,255,255,0.05)',TXT='#6b7c91',BG='#0d1117';
-  const baseOpts={width:container.clientWidth||400,height:180,layout:{background:{type:'solid',color:BG},textColor:TXT,fontFamily:'IBM Plex Mono',fontSize:10},grid:{vertLines:{color:GRID},horzLines:{color:GRID}},crosshair:{mode:LightweightCharts.CrosshairMode.Normal},rightPriceScale:{borderColor:'rgba(255,255,255,0.08)'},timeScale:{borderColor:'rgba(255,255,255,0.08)',timeVisible:false},handleScroll:false,handleScale:false};
+  const intraday=currentRange==='1d'||currentRange==='1w';
+  const baseOpts={width:container.clientWidth||400,height:180,layout:{background:{type:'solid',color:BG},textColor:TXT,fontFamily:'IBM Plex Mono',fontSize:10},grid:{vertLines:{color:GRID},horzLines:{color:GRID}},crosshair:{mode:LightweightCharts.CrosshairMode.Normal},rightPriceScale:{borderColor:'rgba(255,255,255,0.08)'},timeScale:{borderColor:'rgba(255,255,255,0.08)',timeVisible:intraday,secondsVisible:false},handleScroll:false,handleScale:false};
 
   if(!cd||!cd.c?.length){
     const d=priceData[ticker];
@@ -542,7 +564,7 @@ async function drawChart(ticker,type,i){
     return;
   }
 
-  const data=cd.t.map((ts,idx)=>({time:toDateStr(ts),open:cd.o[idx],high:cd.h[idx],low:cd.l[idx],close:cd.c[idx],value:cd.c[idx],color:cd.c[idx]>=cd.o[idx]?'rgba(0,212,170,0.8)':'rgba(240,90,90,0.75)'}));
+  const data=cd.t.map((ts,idx)=>({time:intraday?ts:toDateStr(ts),open:cd.o[idx],high:cd.h[idx],low:cd.l[idx],close:cd.c[idx],value:cd.c[idx],color:cd.c[idx]>=cd.o[idx]?'rgba(0,212,170,0.8)':'rgba(240,90,90,0.75)'}));
 
   chartInst=LightweightCharts.createChart(container,baseOpts);
 
