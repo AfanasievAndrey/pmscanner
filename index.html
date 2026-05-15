@@ -226,7 +226,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 
   <div class="footer-bar">
     <span class="footer-note" id="lu">Not yet refreshed</span>
-    <span class="footer-note">Data · Massive.com API · Auto-refresh 60s</span>
+    <span class="footer-note">Data · Yahoo Finance · Auto-refresh 60s</span>
   </div>
 
 </div>
@@ -257,31 +257,43 @@ function updateClock(){
 }
 setInterval(updateClock,1000);updateClock();
 
-const API_KEY='QdhDtC2VsXl0S1GApzUxbtbtG6Zz24r9';
-const API_BASE='https://api.massive.com'; // get free key at polygon.io
+// Replace with your deployed Cloudflare Worker URL (e.g. https://yahoo-proxy.yourname.workers.dev)
+const WORKER_URL='https://yahoo-proxy.YOUR_SUBDOMAIN.workers.dev'; // get free key at polygon.io
+
+async function fetchYahoo(t,range,interval){
+  const r=await fetch(`${WORKER_URL}/?t=${t}&range=${range}&interval=${interval}`);
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const d=await r.json();
+  const res=d.chart?.result?.[0];
+  if(!res)throw new Error('no data');
+  return res;
+}
 
 async function fetchQuote(t){
   try{
-    const r=await fetch(`${API_BASE}/v2/snapshot/locale/us/markets/stocks/tickers/${t}?apiKey=${API_KEY}`);
-    if(r.status===403){document.getElementById('em').textContent='Invalid API key. Get a free key at polygon.io';return null;}
-    if(r.status===429){document.getElementById('em').textContent='API rate limit hit.';return null;}
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    const d=await r.json();
-    const tk=d.ticker;
-    if(!tk||!tk.day){document.getElementById('em').textContent='"'+t+'" not found or invalid symbol.';return null;}
-    return{price:tk.lastTrade?.p||tk.day.c,prev:tk.prevDay?.c,open:tk.day.o,high:tk.day.h,low:tk.day.l,change:tk.todaysChange,pct:tk.todaysChangePerc};
-  }catch(e){console.error('fetchQuote',t,e);return null;}
+    const res=await fetchYahoo(t,'5d','1d');
+    const m=res.meta;
+    if(!m||!m.regularMarketPrice){document.getElementById('em').textContent='"'+t+'" not found.';return null;}
+    const price=m.regularMarketPrice;
+    const prev=m.chartPreviousClose||m.previousClose;
+    const change=price-prev;
+    const pct=prev?(change/prev)*100:0;
+    return{price,prev,open:m.regularMarketOpen||price,high:m.regularMarketDayHigh||price,low:m.regularMarketDayLow||price,change,pct};
+  }catch(e){console.error('fetchQuote',t,e);document.getElementById('em').textContent='Network error. Check Worker URL.';return null;}
 }
 
 async function fetchCandles(t){
   try{
-    const to=new Date().toISOString().split('T')[0];
-    const from=new Date(Date.now()-86400000*45).toISOString().split('T')[0];
-    const r=await fetch(`${API_BASE}/v2/aggs/ticker/${t}/range/1/day/${from}/${to}?adjusted=true&sort=asc&limit=50&apiKey=${API_KEY}`);
-    if(!r.ok)throw 0;
-    const d=await r.json();
-    if(!d.results?.length)throw 0;
-    return{c:d.results.map(r=>r.c),o:d.results.map(r=>r.o),h:d.results.map(r=>r.h),l:d.results.map(r=>r.l),v:d.results.map(r=>r.v),t:d.results.map(r=>r.t/1000)};
+    const res=await fetchYahoo(t,'2mo','1d');
+    const ts=res.timestamp;const q=res.indicators?.quote?.[0];
+    if(!ts?.length||!q)throw 0;
+    // Filter out null entries (Yahoo sometimes returns nulls for non-trading times)
+    const c=[],o=[],h=[],l=[],v=[],tArr=[];
+    for(let i=0;i<ts.length;i++){
+      if(q.close[i]==null)continue;
+      tArr.push(ts[i]);c.push(q.close[i]);o.push(q.open[i]);h.push(q.high[i]);l.push(q.low[i]);v.push(q.volume[i]);
+    }
+    return{c,o,h,l,v,t:tArr};
   }catch{return null;}
 }
 
